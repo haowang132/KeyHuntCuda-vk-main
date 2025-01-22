@@ -5,11 +5,11 @@ import time
 from datetime import datetime
 
 # Parâmetros base
-start_range = int("10", 16)
-end_range = int("1f", 16)
+start_range = int("40000000000000000", 16)
+end_range = int("7ffffffffffffffff", 16)
 
 initial_total_subranges = 100000
-address = "8f9dff39a81ee4abcbad2ad8bafff090415a2be8"
+address = "8f9dff39a81ee4abcbad2ad8bafff090415a2be8"  # 公钥哈希
 output_file = "FOUNDFOUNDFOUND.txt"
 log_file = "67-Aleatorio.tsv"
 
@@ -39,7 +39,7 @@ def salvar_subrange(subrange_start, subrange_end):
 # Função para executar o KeyHunt
 def executar_keyhunt(subrange_start, subrange_end):
     comando = [
-        "./KeyHunt", "--gpu", "-m", "address", address,
+        "./KeyHunt", "--gpu", "-m", "pub", address,
         "--range", f"{subrange_start}:{subrange_end}",
         "--coin", "BTC", "-o", output_file,
     ]

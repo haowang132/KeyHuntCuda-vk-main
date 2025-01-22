@@ -22,6 +22,16 @@ Point _2Gn;
 
 // ----------------------------------------------------------------------------
 
+enum {
+	SEARCH_MODE_MA = 0,  // Multi Address
+	SEARCH_MODE_SA = 1,  // Single Address
+	SEARCH_MODE_MX = 2,  // Multi X Point
+	SEARCH_MODE_SX = 3,  // Single X Point
+	SEARCH_MODE_PUB = 4  // 新增: Public Key Hash
+};
+
+// ----------------------------------------------------------------------------
+
 KeyHunt::KeyHunt(const std::string& inputFile, int compMode, int searchMode, int coinType, bool useGpu,
 	const std::string& outputFile, bool useSSE, uint32_t maxFound, uint64_t rKey,
 	const std::string& rangeStart, const std::string& rangeEnd, bool& should_exit)
@@ -150,7 +160,7 @@ KeyHunt::KeyHunt(const std::vector<unsigned char>& hashORxpoint, int compMode, i
 	secp = new Secp256K1();
 	secp->Init();
 
-	if (this->searchMode == (int)SEARCH_MODE_SA) {
+	if (this->searchMode == (int)SEARCH_MODE_SA || this->searchMode == (int)SEARCH_MODE_PUB) {
 		assert(hashORxpoint.size() == 20);
 		for (size_t i = 0; i < hashORxpoint.size(); i++) {
 			((uint8_t*)hash160Keccak)[i] = hashORxpoint.at(i);
@@ -379,12 +389,9 @@ void KeyHunt::checkMultiAddresses(bool compressed, Int key, int i, Point p1)
 {
 	unsigned char h0[20];
 
-	// 获取公钥哈希
+	// Point
 	secp->GetHash160(compressed, p1, h0);
-	
-	// 直接用公钥哈希检查bloom filter
 	if (CheckBloomBinary(h0, 20) > 0) {
-		// 找到匹配时,仍然需要生成地址用于显示
 		std::string addr = secp->GetAddress(compressed, h0);
 		if (checkPrivKey(addr, key, i, compressed)) {
 			nbFoundKey++;
@@ -414,12 +421,9 @@ void KeyHunt::checkSingleAddress(bool compressed, Int key, int i, Point p1)
 {
 	unsigned char h0[20];
 
-	// 获取公钥哈希
+	// Point
 	secp->GetHash160(compressed, p1, h0);
-	
-	// 直接比较公钥哈希
 	if (MatchHash((uint32_t*)h0)) {
-		// 找到匹配时,仍然需要生成地址用于显示
 		std::string addr = secp->GetAddress(compressed, h0);
 		if (checkPrivKey(addr, key, i, compressed)) {
 			nbFoundKey++;
@@ -482,10 +486,8 @@ void KeyHunt::checkMultiAddressesSSE(bool compressed, Int key, int i, Point p1, 
 	unsigned char h2[20];
 	unsigned char h3[20];
 
-	// 获取4个公钥哈希
+	// Point -------------------------------------------------------------------------
 	secp->GetHash160(compressed, p1, p2, p3, p4, h0, h1, h2, h3);
-	
-	// 用公钥哈希检查bloom filter
 	if (CheckBloomBinary(h0, 20) > 0) {
 		std::string addr = secp->GetAddress(compressed, h0);
 		if (checkPrivKey(addr, key, i + 0, compressed)) {
@@ -510,6 +512,7 @@ void KeyHunt::checkMultiAddressesSSE(bool compressed, Int key, int i, Point p1, 
 			nbFoundKey++;
 		}
 	}
+
 }
 
 // ----------------------------------------------------------------------------
@@ -521,10 +524,8 @@ void KeyHunt::checkSingleAddressesSSE(bool compressed, Int key, int i, Point p1,
 	unsigned char h2[20];
 	unsigned char h3[20];
 
-	// 获取4个公钥哈希
+	// Point -------------------------------------------------------------------------
 	secp->GetHash160(compressed, p1, p2, p3, p4, h0, h1, h2, h3);
-	
-	// 直接比较公钥哈希
 	if (MatchHash((uint32_t*)h0)) {
 		std::string addr = secp->GetAddress(compressed, h0);
 		if (checkPrivKey(addr, key, i + 0, compressed)) {
@@ -549,6 +550,7 @@ void KeyHunt::checkSingleAddressesSSE(bool compressed, Int key, int i, Point p1,
 			nbFoundKey++;
 		}
 	}
+
 }
 
 // ----------------------------------------------------------------------------
@@ -752,6 +754,9 @@ void KeyHunt::FindKeyCPU(TH_PARAM * ph)
 						case (int)SEARCH_MODE_SX:
 							checkSingleXPoint(true, key, i, pts[i]);
 							break;
+						case (int)SEARCH_MODE_PUB:
+							checkPublicKeyHash(true, key, i, pts[i]);
+							break;
 						default:
 							break;
 						}
@@ -769,6 +774,9 @@ void KeyHunt::FindKeyCPU(TH_PARAM * ph)
 							break;
 						case (int)SEARCH_MODE_SX:
 							checkSingleXPoint(false, key, i, pts[i]);
+							break;
+						case (int)SEARCH_MODE_PUB:
+							checkPublicKeyHash(false, key, i, pts[i]);
 							break;
 						default:
 							break;
@@ -792,6 +800,10 @@ void KeyHunt::FindKeyCPU(TH_PARAM * ph)
 							checkSingleXPoint(true, key, i, pts[i]);
 							checkSingleXPoint(false, key, i, pts[i]);
 							break;
+						case (int)SEARCH_MODE_PUB:
+							checkPublicKeyHash(true, key, i, pts[i]);
+							checkPublicKeyHash(false, key, i, pts[i]);
+							break;
 						default:
 							break;
 						}
@@ -807,6 +819,9 @@ void KeyHunt::FindKeyCPU(TH_PARAM * ph)
 						break;
 					case (int)SEARCH_MODE_SA:
 						checkSingleAddressETH(key, i, pts[i]);
+						break;
+					case (int)SEARCH_MODE_PUB:
+						checkPublicKeyHash(false, key, i, pts[i]);
 						break;
 					default:
 						break;
@@ -894,6 +909,10 @@ void KeyHunt::FindKeyGPU(TH_PARAM * ph)
 	case (int)SEARCH_MODE_SX:
 		g = new GPUEngine(secp, ph->gridSizeX, ph->gridSizeY, ph->gpuId, maxFound, searchMode, compMode, coinType,
 			xpoint, (rKey != 0));
+		break;
+	case (int)SEARCH_MODE_PUB:
+		g = new GPUEngine(secp, ph->gridSizeX, ph->gridSizeY, ph->gpuId, maxFound, searchMode, compMode, coinType,
+			hash160Keccak, (rKey != 0));
 		break;
 	default:
 		printf("Invalid search mode format");
@@ -984,6 +1003,16 @@ void KeyHunt::FindKeyGPU(TH_PARAM * ph)
 				//memcpy((uint32_t*)pk.x.bits, (uint32_t*)it.hash, 8);
 				//string addr = secp->GetAddress(it.mode, pk);
 				if (checkPrivKeyX(/*addr,*/ keys[it.thId], it.incr, it.mode)) {
+					nbFoundKey++;
+				}
+			}
+			break;
+		case (int)SEARCH_MODE_PUB:
+			ok = g->LaunchSEARCH_MODE_PUB(found, false);
+			for (int i = 0; i < (int)found.size() && !endOfSearch; i++) {
+				ITEM it = found[i];
+				std::string addr = secp->GetAddress(it.mode, it.hash);
+				if (checkPrivKey(addr, keys[it.thId], it.incr, it.mode)) {
 					nbFoundKey++;
 				}
 			}
@@ -1405,6 +1434,22 @@ char* KeyHunt::toTimeStr(int sec, char* timeStr)
 //	//y = y / mpf_class(r);
 //	return 0;// y.get_d();
 //}
+
+void KeyHunt::checkPublicKeyHash(bool compressed, Int key, int32_t incr, Point p1)
+{
+	unsigned char h0[20];
+
+	// 获取公钥哈希
+	secp->GetHash160(compressed, p1, h0);
+	
+	// 直接比较公钥哈希
+	if (MatchHash((uint32_t*)h0)) {
+		std::string addr = secp->GetAddress(compressed, h0);
+		if (checkPrivKey(addr, key, incr, compressed)) {
+			nbFoundKey++;
+		}
+	}
+}
 
 
 
